@@ -1,12 +1,12 @@
 import torch
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
-from dataloader import MaestroDataset
+from dataloader import SpectrogramPNGDataset
 from vae import VAE, vae_loss
 from utils import load_best_checkpoint, save_best_checkpoint
 
 
-dataset = MaestroDataset('dataset/genres/classical')
+dataset = SpectrogramPNGDataset('dataset/images/classical')
 dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 
 first_batch = next(iter(dataloader))
@@ -38,7 +38,6 @@ for epoch in range(loaded_epoch, num_epochs):
     
     print(f"Epoch {epoch+1}/{num_epochs} - Loss: {avg_loss:.2f}")
     save_best_checkpoint(model, optimizer, avg_loss, epoch, dir='checkpoints')
-
 
 plt.plot(losses)
 plt.xlabel('Epoch')

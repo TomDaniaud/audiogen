@@ -1,47 +1,55 @@
+# Dataset pour spectrogrammes PNG (images 2D)
 import os
 import torch
-from torch.utils.data import Dataset, DataLoader
-import torchaudio
+import numpy as np
+from PIL import Image
+from torch.utils.data import Dataset
 
-class MaestroDataset(Dataset):
-	def __init__(self, root_dir, sample_rate=16000, segment_length=5):
+class SpectrogramPNGDataset(Dataset):
+	def __init__(self, root_dir):
 		self.root_dir = root_dir
-		self.sample_rate = sample_rate
-		self.segment_length = segment_length  # en secondes
-		self.audio_files = [
+		self.img_files = [
 			os.path.join(root_dir, f)
 			for f in os.listdir(root_dir)
-			if f.endswith('.wav')
+			if f.endswith('.png')
 		]
 
 	def __len__(self):
-		return len(self.audio_files)
+		return len(self.img_files)
 
 	def __getitem__(self, idx):
-		audio_path = self.audio_files[idx]
-		waveform, sr = torchaudio.load(audio_path)
-		# Resample si besoin
-		if sr != self.sample_rate:
-			waveform = torchaudio.transforms.Resample(sr, self.sample_rate)(waveform)
-		# Mono
-		if waveform.shape[0] > 1:
-			waveform = waveform.mean(dim=0, keepdim=True)
-		# Découpe un segment aléatoire
-		num_samples = self.sample_rate * self.segment_length
-		if waveform.shape[1] > num_samples:
-			start = torch.randint(0, waveform.shape[1] - num_samples, (1,)).item()
-			waveform = waveform[:, start:start+num_samples]
-		else:
-			# Padding si trop court
-			pad = num_samples - waveform.shape[1]
-			waveform = torch.nn.functional.pad(waveform, (0, pad))
-		# Normalisation [-1, 1]
-		waveform = waveform / waveform.abs().max()
-		return waveform.squeeze(0)
+		img_path = self.img_files[idx]
+		img = Image.open(img_path).convert('L')  # 'L' = grayscale
+		arr = np.array(img).astype(np.float32) / 255.0  # Normalisation [0, 1]
+		tensor = torch.tensor(arr)
+		# Ajoute la dimension channel si besoin
+		if tensor.dim() == 2:
+			tensor = tensor.unsqueeze(0)
+		return tensor
 
-# Exemple d'utilisation
-# dataset = MaestroDataset('/chemin/vers/maestro-v3.0.0/wav')
-# dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-# for batch in dataloader:
-#     # batch: [batch_size, sample_rate * segment_length]
-#     ... # Utiliser batch pour U-Net ou diffusion
+
+# Dataset pour spectrogrammes (images 2D)
+class SpectrogramDataset(Dataset):
+	def __init__(self, root_dir):
+		self.root_dir = root_dir
+		self.spec_files = [
+			os.path.join(root_dir, f)
+			for f in os.listdir(root_dir)
+			if f.endswith('.pt') or f.endswith('.npy')
+		]
+
+	def __len__(self):
+		return len(self.spec_files)
+
+	def __getitem__(self, idx):
+		spec_path = self.spec_files[idx]
+		if spec_path.endswith('.pt'):
+			spec = torch.load(spec_path)
+		elif spec_path.endswith('.npy'):
+			spec = torch.tensor(np.load(spec_path))
+		# Normalisation [0, 1]
+		spec = (spec - spec.min()) / (spec.max() - spec.min() + 1e-8)
+		# Ajoute la dimension channel si besoin
+		if spec.dim() == 2:
+			spec = spec.unsqueeze(0)
+		return spec
