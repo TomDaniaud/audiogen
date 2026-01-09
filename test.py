@@ -1,38 +1,50 @@
-
-# --- Écouter et sauvegarder des reconstructions audio du VAE ---
-import torchaudio
+# --- Test reconstruction spectrogramme PNG -> WAV ---
+import os
 import torch
+import torchaudio
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
-from dataloader import MaestroDataset
+from dataloader import SpectrogramPNGDataset
 from vae import VAE
 from utils import load_best_checkpoint
 
-
-dataset = MaestroDataset('dataset/genres/classical')
-dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-
+dataset = SpectrogramPNGDataset('dataset/images/classical')
+dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
 first_batch = next(iter(dataloader))
-input_dim = first_batch[0].numel()
+input_channels = first_batch.shape[1]
+height = first_batch.shape[2]
+width = first_batch.shape[3]
 latent_dim = 16
-model = VAE(input_dim=input_dim, latent_dim=latent_dim)
-
+model = VAE(input_channels=input_channels, latent_dim=latent_dim, input_size=(height, width))
 load_best_checkpoint(model, None)
 
-# Prendre un batch du dataloader
-test_batch = next(iter(dataloader))
-test_batch = test_batch.view(test_batch.size(0), -1)
+os.makedirs('out', exist_ok=True)
 
 model.eval()
 with torch.no_grad():
-    x_hat, mu, logvar = model(test_batch)
-    # x_hat shape: [batch_size, input_dim]
-    for i in range(min(5, x_hat.size(0))):
-        audio = x_hat[i].cpu().numpy()
-        # Normalisation pour éviter les saturations
-        audio = audio / max(abs(audio).max(), 1e-8)
+    for i, spec in enumerate(dataloader):
+        # Reconstruire le spectrogramme
+        x_hat, mu, logvar = model(spec)
+        recon = x_hat[0].cpu().numpy().squeeze(0)  # [height, width]
+        # Sauvegarde image reconstruite
+        plt.imsave(f'out/reconstruction_{i}.png', recon, cmap='magma')
+        print(f"Image reconstruite sauvegardée: out/reconstruction_{i}.png")
+        # Transformation en waveform (Griffin-Lim)
+        # On suppose que le spectrogramme est un mel-spectrogramme
+        # Il faut inverser le mel-spectrogramme en waveform
+        # Ici, on utilise torchaudio.transforms.GriffinLim
+        spec_tensor = torch.tensor(recon).unsqueeze(0)  # [1, freq, time]
+        freq_bins = spec_tensor.shape[1]
+        n_fft = (freq_bins - 1) * 2
+        griffin_lim = torchaudio.transforms.GriffinLim(n_fft=n_fft)
+        waveform = griffin_lim(spec_tensor)
+        # Normalisation
+        waveform = waveform / waveform.abs().max()
         # Sauvegarde en WAV
         out_path = f'out/reconstruction_{i}.wav'
-        torchaudio.save(out_path, torch.tensor(audio).unsqueeze(0), 16000)
-        print(f"Reconstruit sauvegardé: {out_path}")
+        sample_rate = 16000
+        torchaudio.save(out_path, waveform, sample_rate)
+        print(f"Reconstruit WAV sauvegardé: {out_path}")
+        # Un seul exemple pour le test
+        break

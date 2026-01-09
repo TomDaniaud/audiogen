@@ -10,9 +10,9 @@ dataset = SpectrogramPNGDataset('dataset/images/classical')
 dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 
 first_batch = next(iter(dataloader))
-input_dim = first_batch[0].numel()
+input_channels = first_batch.shape[1]  # channel (généralement 1)
 latent_dim = 16
-model = VAE(input_dim=input_dim, latent_dim=latent_dim)
+model = VAE(input_channels=input_channels, latent_dim=latent_dim, input_size=first_batch.shape[2:4])
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
 
 loaded_epoch = load_best_checkpoint(model, optimizer)
@@ -25,7 +25,7 @@ for epoch in range(loaded_epoch, num_epochs):
     epoch_loss = 0.0
     num_batches = 0
     for x in dataloader:
-        x = x.view(x.size(0), -1)
+        # x shape: [batch_size, 1, height, width]
         x_hat, mu, logvar = model(x)
         loss = vae_loss(x, x_hat, mu, logvar)
         optimizer.zero_grad()

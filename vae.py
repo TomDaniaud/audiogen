@@ -4,14 +4,21 @@ import torch.nn.functional as F
 
 
 class Encoder(nn.Module):
-    def __init__(self, input_channels, latent_dim):
+    def __init__(self, input_channels, latent_dim, input_size=(128, 128)):
         super().__init__()
         self.conv1 = nn.Conv2d(input_channels, 32, kernel_size=3, stride=2, padding=1)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
         self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
         self.flatten = nn.Flatten()
-        self.fc_mu = nn.Linear(128 * 8 * 8, latent_dim)  # à adapter selon la taille finale
-        self.fc_logvar = nn.Linear(128 * 8 * 8, latent_dim)
+        # Calcul dynamique de la taille après convs
+        with torch.no_grad():
+            dummy = torch.zeros(1, input_channels, *input_size)
+            out = F.relu(self.conv1(dummy))
+            out = F.relu(self.conv2(out))
+            out = F.relu(self.conv3(out))
+            self.flat_dim = out.numel()
+        self.fc_mu = nn.Linear(self.flat_dim, latent_dim)
+        self.fc_logvar = nn.Linear(self.flat_dim, latent_dim)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -28,10 +35,23 @@ def reparameterize(mu, logvar):
     return mu + eps * std
 
 class Decoder(nn.Module):
-    def __init__(self, latent_dim, input_channels):
+    def __init__(self, latent_dim, input_channels, output_size=(128, 128)):
         super().__init__()
-        self.fc = nn.Linear(latent_dim, 128 * 8 * 8)
-        self.unflatten = nn.Unflatten(dim=1, unflattened_size=(128, 8, 8))
+        # Calcul dynamique de la taille à reconstruire
+        self.output_size = output_size
+        # Encoder dummy pour obtenir la taille flatten
+        with torch.no_grad():
+            dummy = torch.zeros(1, input_channels, *output_size)
+            conv1 = nn.Conv2d(input_channels, 32, kernel_size=3, stride=2, padding=1)
+            conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
+            conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
+            out = F.relu(conv1(dummy))
+            out = F.relu(conv2(out))
+            out = F.relu(conv3(out))
+            self.flat_dim = out.numel() // out.shape[0]
+            self.unflatten_shape = out.shape[1:]  # (C, H, W)
+        self.fc = nn.Linear(latent_dim, self.flat_dim)
+        self.unflatten = nn.Unflatten(dim=1, unflattened_size=self.unflatten_shape)
         self.deconv1 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
         self.deconv2 = nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1)
         self.deconv3 = nn.ConvTranspose2d(32, input_channels, kernel_size=3, stride=2, padding=1, output_padding=1)
@@ -46,10 +66,10 @@ class Decoder(nn.Module):
 
 
 class VAE(nn.Module):
-    def __init__(self, input_channels, latent_dim):
+    def __init__(self, input_channels, latent_dim, input_size=(128, 128)):
         super().__init__()
-        self.encoder = Encoder(input_channels, latent_dim)
-        self.decoder = Decoder(latent_dim, input_channels)
+        self.encoder = Encoder(input_channels, latent_dim, input_size=input_size)
+        self.decoder = Decoder(latent_dim, input_channels, output_size=input_size)
 
     def forward(self, x):
         mu, logvar = self.encoder(x)
